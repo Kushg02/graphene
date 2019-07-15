@@ -163,6 +163,15 @@ int lookup_dentry (struct shim_dentry * parent, const char * name, int namelen, 
     dent = __lookup_dcache(parent, name, namelen, NULL);
 
     if (!dent) {
+        if (parent) {
+            /* Newly created dentry's relative path will be a concatenation of parent
+             * + name strings (see get_new_dentry), make sure it fits into qstr */
+            if (parent->rel_path.len + 1 + namelen >= STR_SIZE) {  /* +1 for '/' */
+                debug("Relative path exceeds the limit %d\n", STR_SIZE);
+                return -ENAMETOOLONG;
+            }
+        }
+
         dent = get_new_dentry(fs, parent, name, namelen, NULL);
         if (!dent)
             return -ENOMEM;
@@ -490,6 +499,13 @@ int open_namei (struct shim_handle * hdl, struct shim_dentry * start,
     // lookup the path from start, passing flags
     err = __path_lookupat(start, path, lookup_flags, &mydent, 0, NULL, 0);
 
+    if (mydent && (mydent->state & DENTRY_ISDIRECTORY)) {
+        if (flags & O_WRONLY || flags & O_RDWR) {
+            err = -EISDIR;
+            goto out;
+        }
+    }
+
     // Deal with O_CREAT, O_EXCL, but only if we actually got a valid prefix
     // of directories.
     if (mydent && err == -ENOENT && (flags & O_CREAT)) {
@@ -535,10 +551,13 @@ int open_namei (struct shim_handle * hdl, struct shim_dentry * start,
 
         // Set err back to zero and fall through
         err = 0;
-    } else if (err == 0 && (flags & (O_CREAT|O_EXCL))) {
+    } else if (err == 0 && ((flags & (O_CREAT|O_EXCL)) == (O_CREAT|O_EXCL))) {
         err = -EEXIST;
-    } else if (err < 0)
+    }
+
+    if (err < 0) {
         goto out;
+    }
 
     // Check permission, but only if we didn't create the file.
     // creat/O_CREAT have idiosyncratic semantics about opening a
@@ -621,8 +640,12 @@ int dentry_open (struct shim_handle * hdl, struct shim_dentry * dent,
     }
     qstrsetstr(&hdl->path, path, size);
 
-    /* truncate the file if O_TRUNC is given */
-    if (flags & O_TRUNC) {
+    /* truncate regular writable file if O_TRUNC is given */
+    if ((flags & O_TRUNC) &&
+            ((flags & O_RDWR) | (flags & O_WRONLY)) &&
+            !(dent->state & DENTRY_ISDIRECTORY) &&
+            !(dent->state & DENTRY_MOUNTPOINT) &&
+            !(dent->state & DENTRY_ISLINK)) {
         if (!fs->fs_ops->truncate) {
             ret = -EINVAL;
             goto out;
