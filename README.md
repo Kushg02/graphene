@@ -246,6 +246,13 @@ There are a few built-in examples under LibOS/shim/test/. The "native" folder in
      
     NOTES:
      * It is important that the directories of any libraries you wish to use are added under loader.env.LD_LIBRARY_PATH.
+     * Any files that are needed by the program should have their directories mounted by adding the following code to the manifest:
+         ```
+         fs.mount.DIRNAME.type = chroot
+         fs.mount.DIRNAME.path = /PATH_ON_SYSTEM
+         fs.mount.DIRNAME.uri = file:PATH_IN_GRAPHENE
+         ```
+     * If there are memory or thread errors, increase ```sgx.enclave_size``` or ```sgx.thread_num``` in the manifest.
      * You can add an entire directory to trusted/allowed files by typing file:directory with no slash at the end.
      * Trusted children will need to have their own signatures and tokens. This requires creating a manifest for those files as well, and they will also need to be added to the Makefile.
      * Arguments can be passed normally after the .manifest in terminal.
